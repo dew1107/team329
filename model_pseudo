@@ -1,0 +1,181 @@
+# 클라이언트 모델 정의
+CLASS ClientModel:
+    INITIALIZE model, client_id
+    SET local_representation = None
+
+    FUNCTION generate_local_representation(local_data):
+        local_representation ← model.encode(local_data)  # 클라이언트별 Feature 추출
+        RETURN local_representation
+
+
+# 성능 기준으로 클라이언트 분류
+FUNCTION split_by_perf(client, group):
+    IF client.pf > 0.8:
+        ADD client TO group['s1']
+    ELSE IF client.pf > 0.5:
+        ADD client TO group['s2']
+    ELSE:
+        ADD client TO group['s3']
+
+
+# 클라이언트 데이터를 그룹화
+FUNCTION assign_clients_to_groups(clients, threshold):
+    FOR each client IN clients:
+        has_img ← CHECK IF client HAS img_encoder
+        has_txt ← CHECK IF client HAS txt_encoder
+
+        IF has_img AND has_txt:
+            img_quality ← client.img  # 이미지 품질
+            txt_quality ← client.txt  # 텍스트 품질
+
+            IF ABS(img_quality - txt_quality) > threshold:
+                target_group ← 'imgOnly' IF img_quality > txt_quality ELSE 'txtOnly'
+            ELSE:
+                target_group ← 'imgAndTxt'
+        ELSE IF has_img:
+            target_group ← 'imgOnly'
+        ELSE IF has_txt:
+            target_group ← 'txtOnly'
+        ELSE:
+            CONTINUE  # 상정하지 않은 경우 스킵
+
+        CALL split_by_perf(client, groups[target_group])
+
+
+# 이미지 & 텍스트 인코더 정의
+CLASS ImageEncoder:
+    FUNCTION __init__(level):
+        IF level == 1:
+            model, preprocess ← Load "ViT-L/14"
+        ELSE IF level == 2:
+            model ← Load ResNet-50
+        ELSE:
+            model ← Load MobileNetV3
+
+    FUNCTION encode(image_path):
+        image ← Preprocess image_path
+        RETURN model.encode_image(image)  # 이미지 Feature 반환
+
+
+CLASS TextEncoder:
+    FUNCTION __init__(level):
+        IF level == 1:
+            model ← Load BERT-Large
+        ELSE IF level == 2:
+            model ← Load DistilBERT
+        ELSE:
+            model ← Load TinyBERT
+
+    FUNCTION encode(text):
+        processed_text ← Tokenize and process text
+        RETURN model.encode(processed_text)  # 텍스트 Feature 반환
+
+
+# 공통 데이터 샘플링 (10%)
+FUNCTION sample_common_data(coco_dataset, sample_ratio):
+    image_ids ← GET all image IDs from coco_dataset
+    num_samples ← CALCULATE 10% of total images
+    sampled_ids ← RANDOMLY SAMPLE num_samples from image_ids
+
+    common_data ← {"images": [], "annotations": []}
+
+    FOR each img_id IN sampled_ids:
+        ADD coco_dataset[img_id] TO common_data["images"]
+        ann_ids ← GET annotations for img_id
+        ADD ann_ids TO common_data["annotations"]
+
+    RETURN common_data
+
+
+# 공통 데이터를 로컬 모델에 입력하여 Representation 추출 및 저장
+FUNCTION generate_and_store_representations(clients, common_data):
+    FOR each client IN clients:
+        group_name ← GET client group ("imgAndTxt", "imgOnly", "txtOnly")
+
+        FOR each image IN common_data["images"]:
+            image_path ← image["file_name"]
+            captions ← GET corresponding captions from common_data["annotations"]
+
+            img_rep, txt_rep ← EXTRACT representations(client, image_path, captions[0])
+
+            IF img_rep IS NOT NULL:
+                ADD img_rep TO representations[group_name]["img"]
+            IF txt_rep IS NOT NULL:
+                ADD txt_rep TO representations[group_name]["txt"]
+
+
+# K-Means 클러스터링 
+FUNCTION perform_kmeans_clustering(representations, num_clusters):
+    clustered_representations ← CREATE empty dictionary
+
+    FOR each group_name IN representations:
+        FOR each data_type IN ["img", "txt"]:
+            data_list ← GET representations[group_name][data_type]
+
+            IF data_list IS EMPTY:
+                CONTINUE
+
+            data_matrix ← CONVERT data_list TO matrix format
+
+            kmeans_model ← INITIALIZE K-Means with num_clusters
+            cluster_labels ← FIT and predict clusters for data_matrix
+
+            STORE cluster_labels, cluster centroids, and data_matrix IN clustered_representations[group_name][data_type]
+
+    RETURN clustered_representations
+
+
+# 글로벌 인코딩 - Transformer 기반 Cross-Attention 학습
+FUNCTION train_global_model(clustered_representations, num_clusters):
+    INITIALIZE global_transformer AS TransformerModel()
+    INITIALIZE local_models AS empty dictionary
+
+    # 클러스터 개수에 따라 유동적으로 로컬 모델 생성
+    FOR cluster_id IN range(num_clusters):
+        local_models[cluster_id] ← Initialize LocalModel()
+
+    # 각 클러스터에서 Representation을 가져와 Transformer 입력으로 사용
+    FOR each cluster_id IN clustered_representations:
+        img_representations ← clustered_representations[cluster_id]["img"]
+        txt_representations ← clustered_representations[cluster_id]["txt"]
+
+        stacked_img_representations ← STACK img_representations
+        stacked_txt_representations ← STACK txt_representations
+
+        # Cross-Attention 수행 (이미지 ↔ 텍스트)
+        global_representation ← global_transformer.cross_attention(stacked_img_representations, stacked_txt_representations)
+
+        # 클러스터별 글로벌 Representation 저장
+        clustered_representations[cluster_id]["global"] ← global_representation
+
+    RETURN clustered_representations, global_transformer
+
+
+# 글로벌 Representation을 로컬 모델에 전달하여 업데이트
+FUNCTION update_local_models(local_models, clustered_representations):
+    FOR each cluster_id IN local_models:
+        local_model ← local_models[cluster_id]
+        global_representation ← clustered_representations[cluster_id]["global"]
+
+        # 로컬 모델 업데이트 (e.g., Knowledge Distillation, Fine-tuning)
+        local_model.update(global_representation)
+
+    RETURN local_models
+
+
+num_clusters ← 5  # 클러스터 개수
+
+# 공통 데이터 샘플링
+common_data ← sample_common_data(coco_dataset, 0.1)
+
+# 클라이언트 Representation 생성 및 저장
+generate_and_store_representations(clients, common_data)
+
+# K-Means 클러스터링 수행
+clustered_representations ← perform_kmeans_clustering(representations, num_clusters)
+
+# 글로벌 모델 학습
+clustered_representations, global_transformer ← train_global_model(clustered_representations, num_clusters)
+
+# 로컬 모델 업데이트
+updated_local_models ← update_local_models(local_models, clustered_representations)
