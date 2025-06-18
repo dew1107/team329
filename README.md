@@ -107,28 +107,38 @@ CLIENT_ROOT/
 
 **Late Fusion:**
 
-각 modality 클러스터에서 중심 벡터(center vector)를 추출하여 Late Fusion
+- 각 modality 클러스터에서 중심 벡터(center vector)를 추출하여 Late Fusion
 
 **Cross-Attention & Gating:**
 
-CrossAttentionTransformer: 이미지-텍스트 중심 벡터 간 핵심 정보 Z 추출
+- CrossAttentionTransformer: 이미지-텍스트 중심 벡터 간 핵심 정보 Z 추출
 
-GatingMechanism: forget gate 기반으로 최종 통합 표현 R 생성
+- GatingMechanism: forget gate 기반으로 최종 통합 표현 R 생성
 
 ### 📁 3. Classification & Global Update (분류 및 글로벌 업데이트 영역)
 분류:
 
-통합 표현 R을 입력으로 하는 FusionClassifier 수행
+- 통합 표현 R을 입력으로 하는 FusionClassifier 수행
 
-Cross-entropy loss로 최종 classification 결과 도출
+- Cross-entropy loss로 최종 classification 결과 도출
 
 **글로벌 업데이트:**
 
-클라이언트별 adapter layer 성능 기반 기여도를 계산
+- 클라이언트별 adapter layer(Fusion Classifier 앞단) 성능 기반 기여도를 계산
 
-가중 평균 방식으로 글로벌 모델 업데이트
+- 계산된 기여도를 바탕으로 가중 평균 방식으로 글로벌 모델 업데이트
 
-adapter weight는 서버에서 통합, local encoder는 클라이언트가 유지
+- adapter weight(로컬에서 새로 계산된 weight)는 서버에서 통합 후 재배포하, local encoder는 클라이언트가 유지
+
+`classification_01.jpynb` 파일 설명
+| 파일 / 함수명                      | 설명                                              |
+| ----------------------------- | ----------------------------------------------- |
+| `run_client_training()`       | 각 클라이언트에서 로컬 학습 수행                              |
+| `extract_representations()`   | MobileNetV3 / BERT Mini로 이미지/텍스트 벡터 추출          |
+| `run_clustering_and_fusion()` | K-Means, Hungarian 알고리즘 및 Cross-Attention 융합 처리 |
+| `FusionClassifier`            | 최종 통합 표현 R에 대한 분류기                              |
+| `global_update()`             | 클라이언트별 가중치 반영 후 글로벌 모델 업데이트                     |
+
 
 ## 기대 효과
 - 모달리티 결손 문제 해결: 부족한 정보를 글로벌 벡터를 통해 보완할 수 있습니다.
