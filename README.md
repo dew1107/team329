@@ -130,7 +130,7 @@ CLIENT_ROOT/
 
 - adapter weight(로컬에서 새로 계산된 weight)는 서버에서 통합 후 재배포하, local encoder는 클라이언트가 유지
 
-`classification_01.jpynb` 파일 설명
+`classification_01.jpynb` 
 | 파일 / 함수명                      | 설명                                              |
 | ----------------------------- | ----------------------------------------------- |
 | `run_client_training()`       | 각 클라이언트에서 로컬 학습 수행                              |
