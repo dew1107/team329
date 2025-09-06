@@ -1,0 +1,10 @@
+archive/rocov2.zip
+
+archive/rocov2/.venv
+
+archive/rocov2/_prepared
+
+archive/rocov2/global_train
+archive/rocov2/test_images
+archive/rocov2/train_images
+archive/rocov2/valid_images
