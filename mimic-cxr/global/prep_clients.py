@@ -7,17 +7,6 @@ prep_clients.py
 train_local.py의 Dataset/모델/라벨 설정을 그대로 재사용합니다.
 """
 
-
-'''
-생성물 (각 outputs/client_xx 폴더)
-
-client_{cid}_metrics.json : f1_micro, f1_macro, auc_macro, num_classes
-
-repr_img.npy / repr_txt.npy : L2 정규화된 임베딩 (해당 모달리티가 있을 때만)
-
-index.csv : subject_id,study_id,has_img,has_txt (임베딩 행과 1:1 매칭)
-'''
-
 from __future__ import annotations
 import os
 import json
@@ -30,9 +19,12 @@ import torch
 from torch.utils.data import DataLoader, random_split
 from sklearn.metrics import f1_score, roc_auc_score
 
-# ---- train_local.py에서 필요한 구성요소 import ----
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# ---- local/train_local.py 에서 필요한 구성요소 import ----
 from local.train_local import (
-    CLIENT_CSV_DIR,
+    CLIENT_CSV_DIR,          # r".\client_splits"
     ClientDataset,
     LABEL_COLUMNS,
     load_label_table,
@@ -46,7 +38,7 @@ from local.train_local import (
 )
 
 SEED = 42
-BATCH_DEFAULT = 64  # 임베딩 추출 배치 (메모리 따라 조정)
+BATCH_DEFAULT = 64  # 임베딩 추출 배치 (메모리 상황에 따라 조정)
 
 # =========================
 # 유틸
@@ -71,11 +63,11 @@ def l2_normalize_rows(x: np.ndarray) -> np.ndarray:
     return (x / n).astype(np.float32)
 
 # =========================
-# 모델 로드 (train_local 체크포인트)
+# 체크포인트 로드
 # =========================
 def build_model_from_ckpt(cid: int, ckpt_path: str, device: torch.device):
     if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"[client_{cid}] checkpoint not found: {ckpt_path}")
+        raise FileNotFoundError(f"[client_{cid:02d}] checkpoint not found: {ckpt_path}")
     ckpt = torch.load(ckpt_path, map_location="cpu")
     mode = ckpt.get("mode", "multimodal")
     n_out = len(LABEL_COLUMNS)
@@ -97,7 +89,7 @@ def build_model_from_ckpt(cid: int, ckpt_path: str, device: torch.device):
 def build_dataloaders(cid: int, batch_size: int):
     csv_path = os.path.join(CLIENT_CSV_DIR, f"client_{cid:02d}.csv")
     if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"[client_{cid}] CSV not found: {csv_path}")
+        raise FileNotFoundError(f"[client_{cid:02d}] CSV not found: {csv_path}")
 
     mode = decide_mode_for_cid(cid)
     label_table = load_label_table(LABEL_CSV)
@@ -108,12 +100,15 @@ def build_dataloaders(cid: int, batch_size: int):
     n = len(ds_full)
     n_tr = int(n * 0.9)
     n_va = n - n_tr
-    tr_set, va_set = random_split(ds_full, [n_tr, n_va],
-                                  generator=torch.Generator().manual_seed(SEED))
+    tr_set, va_set = random_split(
+        ds_full, [n_tr, n_va],
+        generator=torch.Generator().manual_seed(SEED)
+    )
 
-    # 재현성 위해 둘 다 shuffle=False
-    train_loader = DataLoader(tr_set, batch_size=batch_size, shuffle=False, num_workers=0)
-    val_loader   = DataLoader(va_set, batch_size=batch_size, shuffle=False, num_workers=0)
+    # 재현성 & 임베딩-인덱스 매칭을 위해 둘 다 shuffle=False
+    pin = torch.cuda.is_available()
+    train_loader = DataLoader(tr_set, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin)
+    val_loader   = DataLoader(va_set,   batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin)
     return train_loader, val_loader, mode
 
 # =========================
@@ -123,10 +118,12 @@ def safe_multilabel_metrics(all_logits: torch.Tensor, all_labels: torch.Tensor) 
     probs = torch.sigmoid(all_logits).cpu().numpy()
     y_true = all_labels.cpu().numpy().astype(np.int32)
 
+    # F1
     y_pred = (probs >= 0.5).astype(np.int32)
     f1_micro = f1_score(y_true, y_pred, average="micro", zero_division=0)
     f1_macro = f1_score(y_true, y_pred, average="macro", zero_division=0)
 
+    # AUROC (정의 불가 클래스 제외)
     auc_list = []
     C = y_true.shape[1]
     for c in range(C):
@@ -164,8 +161,10 @@ def evaluate_on_loader(model, val_loader, mode: str, device: torch.device) -> Di
         logits, y = forward_logits(model, batch, mode, device)
         logits_all.append(logits.detach().cpu())
         labels_all.append(y.detach().cpu())
+
     if len(logits_all) == 0:
         return {"f1_micro": 0.0, "f1_macro": 0.0, "auc_macro": float("nan")}
+
     logits_all = torch.cat(logits_all, dim=0)
     labels_all = torch.cat(labels_all, dim=0)
     return safe_multilabel_metrics(logits_all, labels_all)
@@ -174,8 +173,8 @@ def evaluate_on_loader(model, val_loader, mode: str, device: torch.device) -> Di
 def extract_reps_from_batch(model, batch, mode: str, device: torch.device) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
     """
     train_local.py 구조에 맞춰 인코더 출력(분류기 이전)을 임베딩으로 사용.
-    - 이미지: (멀티모달) model.img.backbone(x)  / (이미지전용) model.backbone(x)
-    - 텍스트: (멀티모달) model.txt.enc(...).last_hidden_state[:,0] / (텍스트전용) model.enc(...)
+      - 이미지: (멀티모달) model.img.backbone(x)  / (이미지전용) model.backbone(x)
+      - 텍스트: (멀티모달) model.txt.enc(...).last_hidden_state[:,0] / (텍스트전용) model.enc(...).last_hidden_state[:,0]
     """
     img_rep, txt_rep = None, None
 
@@ -238,11 +237,13 @@ def dump_train_reps(model, train_loader, mode: str, device: torch.device, out_di
         txt_np = l2_normalize_rows(txt_np)
         np.save(os.path.join(out_dir, "repr_txt.npy"), txt_np)
 
-    # 임베딩 행 순서와 동일한 인덱스 CSV
+    # 임베딩 순서와 동일한 인덱스 CSV
     if index_rows:
         import pandas as pd
-        pd.DataFrame(index_rows).to_csv(os.path.join(out_dir, "index.csv"),
-                                        index=False, encoding="utf-8-sig")
+        pd.DataFrame(index_rows).to_csv(
+            os.path.join(out_dir, "index.csv"),
+            index=False, encoding="utf-8-sig"
+        )
 
 # =========================
 # 클라이언트 단위 실행
@@ -258,7 +259,7 @@ def run_for_client(cid: int, batch_size: int, device: torch.device):
     # (1) 검증 메트릭 저장
     metrics = evaluate_on_loader(model, val_loader, mode, device)
     metrics["num_classes"] = len(LABEL_COLUMNS)
-    with open(os.path.join(cdir, f"client_{cid}_metrics.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(cdir, f"client_{cid:02d}_metrics.json"), "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False)
     print(f"[client_{cid:02d}] metrics:", metrics)
 
