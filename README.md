@@ -18,7 +18,7 @@
 - **결과**: 각 병원이 보유한 데이터의 특성에 따라 AI 성능이 달라집니다. 특히, 특정 병원에서 드물게 관찰되는 질환에 대해서는 AI가 현저히 낮은 성능을 보일 수 있습니다.
 
 ### 해결 전략: 연합학습(FL)과 FD 기술의 결합
-이 문제를 해결하기 위해 **연합학습(Federated Learning, FL)**과 FD(Fusion for Missing Modality/Failure-robust Design) 기술을 결합하는 방안이 주목받고 있습니다.
+이 문제를 해결하기 위해 **연합학습(Federated Learning, FL)** 과 **FD(Fusion for Missing Modality/Failure-robust Design)** 기술을 결합하는 방안이 주목받고 있습니다.
 
 - **연합학습 (FL)**: 여러 병원이 민감한 환자 데이터를 직접 공유하지 않고, 각자 학습시킨 AI 모델의 일부 정보(파라미터)만을 공유해 협력하는 기술입니다. 이를 통해 개인정보를 보호하면서 더 똑똑한 AI를 만들 수 있습니다.
 
