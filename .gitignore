@@ -148,4 +148,6 @@ pyvenv.cfg
 .venv
 pip-selfcheck.json
 
+!mimic-cxr/local/
+
 # End of https://www.toptal.com/developers/gitignore/api/pycharm,data,venv
