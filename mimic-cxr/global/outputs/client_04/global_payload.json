@@ -1,0 +1,10 @@
+{
+  "client_id": 4,
+  "type": "fusion",
+  "Z_path": "global_outputs\\Z_mm.npy",
+  "d_global": 256,
+  "role": "solo",
+  "teacher_ids": [],
+  "group": "unknown",
+  "metric": null
+}

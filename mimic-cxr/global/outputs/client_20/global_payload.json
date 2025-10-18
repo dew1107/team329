@@ -1,0 +1,11 @@
+{
+  "client_id": 20,
+  "type": "text_only",
+  "Z_proxy_image_path": "global_outputs\\Z_txt2img.npy",
+  "d_global": 256,
+  "role": "student",
+  "teacher_ids": [
+    19
+  ],
+  "metric": null
+}

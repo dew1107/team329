@@ -1,0 +1,41 @@
+{
+  "metric_name": "macro_auroc",
+  "higher_is_better": true,
+  "K_img": 4,
+  "K_txt": 4,
+  "d_model": 256,
+  "sample_per_client": 20000,
+  "k_per_student": 2,
+  "fusion_groups": {
+    "high": [],
+    "low": []
+  },
+  "kd_edges": {
+    "fusion": [],
+    "image_only": [
+      [
+        17,
+        18
+      ]
+    ],
+    "text_only": [
+      [
+        19,
+        20
+      ]
+    ]
+  },
+  "image_only": [
+    17,
+    18
+  ],
+  "text_only": [
+    19,
+    20
+  ],
+  "Z_paths": {
+    "Z_mm": "global_outputs\\Z_mm.npy",
+    "Z_img2txt": "global_outputs\\Z_img2txt.npy",
+    "Z_txt2img": "global_outputs\\Z_txt2img.npy"
+  }
+}
