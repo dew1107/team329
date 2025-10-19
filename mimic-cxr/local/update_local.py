@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-update_local_embed.py (refined eval)
+update_local.py (refined eval)
 - 원본 파일을 다시 읽지 않고, prep_clients.py가 만든 임베딩(repr_img.npy, repr_txt.npy) + index.csv + 라벨 CSV만으로
   로컬 분류 헤드들을 소규모 업데이트(Z 정렬 + 게이팅 포함)하고,
   '동일한 임베딩 검증 분할'에서 baseline(best.pt의 헤드) vs updated 헤드를 공정 비교합니다.
@@ -8,8 +8,8 @@ update_local_embed.py (refined eval)
 - Z(글로벌 벡터) 정렬 손실과 게이팅 알고리즘은 유지됩니다.
 
 사용 예:
-  python -u update_local_embed.py --client_id 1-20 --epochs 1 --z_weight 0.1 --tau 0.1
-  python -u update_local_embed.py --client_id 1 --label_csv .\\mimic-cxr-2.0.0-negbio.csv
+  python -u update_local.py --client_id 1-20 --epochs 1 --z_weight 0.1 --tau 0.1
+  python -u update_local.py --client_id 1 --label_csv .\\mimic-cxr-2.0.0-negbio.csv
 """
 
 import os, json, argparse, csv

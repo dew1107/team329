@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-evaluate_baseline.py
-- 각 클라이언트의 기존 로컬 모델(best.pt)을 '그대로' 사용해 테스트셋을 평가합니다.
-- 원본 파일(이미지/텍스트)을 로드하여 추론하고, 멀티모달은 0.5*(img+txt)로 late fusion.
-- Z나 updated heads를 전혀 사용하지 않습니다.
+eval_updated_z.py
+- 각 클라이언트의 기존 로컬 모델(best.pt)로 baseline 테스트 성능 측정
+- 같은 테스트 데이터에서 updated_heads.npz(있다면)를 분류 헤드에 주입하여 updated 성능 측정
+- 원본 파일(이미지/텍스트)로 추론. 멀티모달은 0.5*(img+txt) late fusion 유지.
+- Z나 게이팅은 '업데이트 시점'에 반영되었으므로 여기선 순수 추론만 수행.
 
 사용 예:
   # 전 클라(1~20), 기본 test.csv + 기본 라벨 CSV(NEGBIO/CHEXPERT)
-  python -u evaluate_baseline.py --clients 1-20
+  python -u eval_updated_z.py --clients 1-20
 
-  # 특정 클라만, 테스트 split/라벨 CSV를 명시
-  python -u evaluate_baseline.py --clients 1,3,7 \
-    --test_csv .\client_splits\test.csv \
-    --label_csv .\mimic-cxr-2.0.0-negbio.csv
+  # 특정 클라만, 테스트 split/라벨 CSV 명시
+  python -u eval_updated_z.py.py --clients 1,3,7 \
+    --test_csv .\\client_splits\\test.csv \
+    --label_csv .\\mimic-cxr-2.0.0-negbio.csv
+
+출력:
+  - 각 클라 폴더(outputs/client_xx/)에 compare_test_metrics.json 저장
+  - eval_results/summary_compare.csv에 baseline/updated 지표 요약 저장
 """
 
 import os, csv, json, argparse
@@ -52,7 +57,7 @@ BATCH_SIZE = 32
 NUM_WORKERS = 0
 
 OUT_DIR = Path("./eval_results"); OUT_DIR.mkdir(parents=True, exist_ok=True)
-SUMMARY_CSV = OUT_DIR / "summary_baseline.csv"
+SUMMARY_CSV = OUT_DIR / "summary_compare.csv"
 
 IMG_TRANSFORM = transforms.Compose([
     transforms.Resize(256),
@@ -113,8 +118,7 @@ class TestDataset(Dataset):
         p = Path(image_dir)
         imgs = sorted([*p.glob("*.jpg"), *p.glob("*.jpeg"), *p.glob("*.png")])
         if not imgs:
-            # 이미지가 없으면 zero-tensor 반환 (멀티모달에서 평균 시 자동 보정)
-            return torch.zeros(3,224,224)
+            return torch.zeros(3,224,224)  # 이미지 없을 때 안전 처리
         try:
             return IMG_TRANSFORM(Image.open(imgs[0]).convert("RGB"))
         except Exception:
@@ -186,6 +190,47 @@ def load_ckpt_as_model(ckpt_path: str, n_out: int, device: str):
     model.load_state_dict(ckpt["model"])
     return model.to(device), mode
 
+def apply_updated_heads_if_any(model, client_dir: Path):
+    """
+    outputs/client_xx/updated_heads.npz 존재 시, 모양이 맞는 헤드에만 주입.
+    - 멀티모달: img.head, txt.cls_head 각각 시도
+    - 이미지 전용: head
+    - 텍스트 전용: cls_head
+    """
+    npz_path = client_dir / "updated_heads.npz"
+    if not npz_path.exists():
+        return False  # updated 없음
+
+    data = np.load(npz_path, allow_pickle=False)
+    applied = False
+
+    def try_copy_lin(linear: nn.Linear, W_key: str, b_key: str):
+        nonlocal applied
+        if W_key in data and b_key in data:
+            W = torch.from_numpy(data[W_key]).float()
+            b = torch.from_numpy(data[b_key]).float()
+            if list(W.shape) == list(linear.weight.shape) and list(b.shape) == list(linear.bias.shape):
+                with torch.no_grad():
+                    linear.weight.copy_(W.to(linear.weight.device))
+                    linear.bias.copy_(b.to(linear.bias.device))
+                applied = True
+
+    # 멀티모달
+    if hasattr(model, "img") and hasattr(model.img, "head"):
+        try_copy_lin(model.img.head, "W_img", "b_img")
+    if hasattr(model, "txt") and hasattr(model.txt, "cls_head"):
+        try_copy_lin(model.txt.cls_head, "W_txt", "b_txt")
+
+    # 싱글모달 (이미지 전용)
+    if hasattr(model, "head") and isinstance(model.head, nn.Linear):
+        try_copy_lin(model.head, "W_img", "b_img")
+
+    # 싱글모달 (텍스트 전용)
+    if hasattr(model, "cls_head") and isinstance(model.cls_head, nn.Linear):
+        try_copy_lin(model.cls_head, "W_txt", "b_txt")
+
+    return applied
+
 # --------------------------
 # 평가
 # --------------------------
@@ -243,7 +288,6 @@ def parse_clients(s: str) -> List[int]:
             out.extend(list(range(int(a), int(b)+1)))
         else:
             out.append(int(part))
-    # unique + sort
     return sorted(list(dict.fromkeys(out)))
 
 def main():
@@ -264,43 +308,71 @@ def main():
 
     rows = []
     for cid in clients:
-        ckpt_path = Path(f"./outputs/client_{cid:02d}/best.pt")
+        client_dir = Path(f"./outputs/client_{cid:02d}")
+        ckpt_path = client_dir / "best.pt"
         if not ckpt_path.exists():
             print(f"[WARN] skip client {cid:02d} (no best.pt)")
             continue
 
-        model, mode = load_ckpt_as_model(str(ckpt_path), n_out, DEVICE)
-        loss, f1_micro, f1_macro, macro_auc, aurocs = evaluate(model, dl, DEVICE)
+        # 1) baseline
+        base_model, mode = load_ckpt_as_model(str(ckpt_path), n_out, DEVICE)
+        base_loss, base_f1_micro, base_f1_macro, base_macro_auc, base_aucs = evaluate(base_model, dl, DEVICE)
 
         print(f"[Client {cid:02d} | {mode:11s}] "
-              f"loss={loss:.4f}  f1_micro={f1_micro:.4f}  f1_macro={f1_macro:.4f}  macro_auc={macro_auc:.4f}")
+              f"BASE: loss={base_loss:.4f}  f1_micro={base_f1_micro:.4f}  "
+              f"f1_macro={base_f1_macro:.4f}  macro_auc={base_macro_auc:.4f}")
+
+        # 2) updated (있으면 헤드 주입)
+        upd_model, _ = load_ckpt_as_model(str(ckpt_path), n_out, DEVICE)
+        applied = apply_updated_heads_if_any(upd_model, client_dir)
+
+        if applied:
+            upd_loss, upd_f1_micro, upd_f1_macro, upd_macro_auc, upd_aucs = evaluate(upd_model, dl, DEVICE)
+            print(f"                    "
+                  f"UPDT: loss={upd_loss:.4f}  f1_micro={upd_f1_micro:.4f}  "
+                  f"f1_macro={upd_f1_macro:.4f}  macro_auc={upd_macro_auc:.4f}")
+        else:
+            upd_loss = upd_f1_micro = upd_f1_macro = upd_macro_auc = float("nan")
+            upd_aucs = [float("nan")] * len(LABEL_COLUMNS)
+            print("                    UPDT: (updated_heads.npz 없음 또는 shape 불일치)")
 
         # per-client JSON 저장
-        client_dir = Path(f"./outputs/client_{cid:02d}")
-        client_dir.mkdir(parents=True, exist_ok=True)
-        with open(client_dir/"test_metrics.json", "w", encoding="utf-8") as f:
-            json.dump({
-                "client_id": cid, "mode": mode,
-                "loss": loss, "f1_micro": f1_micro, "f1_macro": f1_macro,
-                "macro_auroc": macro_auc,
-                "per_class_auroc": {c: (None if (a!=a) else float(a)) for c,a in zip(LABEL_COLUMNS, aurocs)}
-            }, f, indent=2, ensure_ascii=False)
+        compare_json = {
+            "client_id": cid, "mode": mode,
+            "baseline": {
+                "loss": base_loss, "f1_micro": base_f1_micro, "f1_macro": base_f1_macro,
+                "macro_auroc": base_macro_auc,
+                "per_class_auroc": {c: (None if (a!=a) else float(a)) for c,a in zip(LABEL_COLUMNS, base_aucs)}
+            },
+            "updated": {
+                "loss": (None if (upd_loss!=upd_loss) else float(upd_loss)),
+                "f1_micro": (None if (upd_f1_micro!=upd_f1_micro) else float(upd_f1_micro)),
+                "f1_macro": (None if (upd_f1_macro!=upd_f1_macro) else float(upd_f1_macro)),
+                "macro_auroc": (None if (upd_macro_auc!=upd_macro_auc) else float(upd_macro_auc)),
+                "per_class_auroc": {c: (None if (a!=a) else float(a)) for c,a in zip(LABEL_COLUMNS, upd_aucs)}
+            }
+        }
+        with open(client_dir/"compare_test_metrics.json", "w", encoding="utf-8") as f:
+            json.dump(compare_json, f, indent=2, ensure_ascii=False)
 
-        row = {"client_id": cid, "mode": mode, "loss": loss,
-               "f1_micro": f1_micro, "f1_macro": f1_macro, "macro_auroc": macro_auc}
-        for c,a in zip(LABEL_COLUMNS, aurocs): row[f"AUROC_{c}"] = a
+        row = {
+            "client_id": cid, "mode": mode,
+            "baseline_loss": base_loss, "baseline_f1_micro": base_f1_micro,
+            "baseline_f1_macro": base_f1_macro, "baseline_macro_auroc": base_macro_auc,
+            "updated_loss": upd_loss, "updated_f1_micro": upd_f1_micro if upd_f1_micro==upd_f1_micro else None,
+            "updated_f1_macro": upd_f1_macro if upd_f1_macro==upd_f1_macro else None,
+            "updated_macro_auroc": upd_macro_auc if upd_macro_auc==upd_macro_auc else None,
+        }
         rows.append(row)
 
     # 전체 요약 CSV
     if rows:
-        rows.sort(key=lambda r: (r["macro_auroc"] if r["macro_auroc"]==r["macro_auroc"] else -1), reverse=True)
-        headers = ["client_id","mode","loss","f1_micro","f1_macro","macro_auroc"] + [f"AUROC_{c}" for c in LABEL_COLUMNS]
+        headers = ["client_id","mode",
+                   "baseline_loss","baseline_f1_micro","baseline_f1_macro","baseline_macro_auroc",
+                   "updated_loss","updated_f1_micro","updated_f1_macro","updated_macro_auroc"]
         with open(SUMMARY_CSV, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.DictWriter(f, fieldnames=headers); w.writeheader(); w.writerows(rows)
         print(f"\n[INFO] Saved summary → {SUMMARY_CSV} ({len(rows)} rows)")
-        print("Top-5 by macro_auroc:")
-        for r in rows[:5]:
-            print(f"  client_{r['client_id']:02d} [{r['mode']}]: {r['macro_auroc']:.4f}")
     else:
         print("[WARN] no evaluated clients; check paths.")
 
