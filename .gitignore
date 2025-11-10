@@ -1,0 +1,7 @@
+./mimic-cxr/venv/
+./mimic-cxr/outputs/
+./.idea/
+
+mimic-cxr/venv/
+mimic-cxr/outputs/
+.idea/
