@@ -5,3 +5,6 @@
 mimic-cxr/venv/
 mimic-cxr/outputs/
 .idea/
+
+mimic-cxr/global_util/__pycache__/
+mimic-cxr/local_util/__pycache__/
