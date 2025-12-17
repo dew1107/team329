@@ -174,6 +174,75 @@ python update_clients.py  # 클라이언트가 글로벌 정보 반영
 ※ 실제 실행 시, 클라이언트별 디렉토리 구성과 환경 설정이 필요합니다.
 ```
 
+# 실행 결과 (일부)
+```
+======================================================================
+[GpuMonitor] pynvml initialized. Monitoring GPU 0.
+[GpuMonitor] Monitor thread started. Logging to: outputs\client_17\client_17_gpu_update_v2_log.csv
+[client_17] Data loaded: mode=image_only, total=6500 (train=5850, val=650)
+[client_17] Z loaded: shape=(6, 256)
+[client_17] Baseline (on 10% val): {'loss': 0.25629968368090117, 'f1_micro': 0.33121019108280253, 'f1_macro': 0.13120336158174845, 'auc_macro': 0.7156502858959265}
+[Ep 1/2] train_loss_main=0.2263 | train_loss_z=0.0999 | val_loss=0.2576 | val_f1_macro=0.1963
+[Ep 2/2] train_loss_main=0.2212 | train_loss_z=0.0998 | val_loss=0.2584 | val_f1_macro=0.1795
+[client_17] Updated (on 10% val): {'loss': 0.25841172236662646, 'f1_micro': 0.3977110157367668, 'f1_macro': 0.1795058143964308, 'auc_macro': 0.7305021626201271}
+[client 17] updated full model (head only trained) saved → outputs\client_17\updated_heads_v2.pt
+[GpuMonitor] Stopping monitor thread...
+[GpuMonitor] pynvml shutdown.
+[GpuMonitor] Monitor stopped.
+======================================================================
+
+======================================================================
+▶ Client 18 | V2 Update starting...
+======================================================================
+[GpuMonitor] pynvml initialized. Monitoring GPU 0.
+[GpuMonitor] Monitor thread started. Logging to: outputs\client_18\client_18_gpu_update_v2_log.csv
+[client_18] Data loaded: mode=image_only, total=6500 (train=5850, val=650)
+[client_18] Z loaded: shape=(6, 256)
+[client_18] Baseline (on 10% val): {'loss': 0.26852639441306775, 'f1_micro': 0.29635258358662614, 'f1_macro': 0.10324139965980333, 'auc_macro': 0.7127173861949362}
+[Ep 1/2] train_loss_main=0.2370 | train_loss_z=0.0999 | val_loss=0.2711 | val_f1_macro=0.1248
+[Ep 2/2] train_loss_main=0.2328 | train_loss_z=0.0999 | val_loss=0.2725 | val_f1_macro=0.1450
+[client_18] Updated (on 10% val): {'loss': 0.2724794720686399, 'f1_micro': 0.34425087108013935, 'f1_macro': 0.14499985233250504, 'auc_macro': 0.7173449486719888}
+[client 18] updated full model (head only trained) saved → outputs\client_18\updated_heads_v2.pt
+[GpuMonitor] Stopping monitor thread...
+[GpuMonitor] pynvml shutdown.
+[GpuMonitor] Monitor stopped.
+======================================================================
+
+======================================================================
+▶ Client 19 | V2 Update starting...
+======================================================================
+[GpuMonitor] pynvml initialized. Monitoring GPU 0.
+[GpuMonitor] Monitor thread started. Logging to: outputs\client_19\client_19_gpu_update_v2_log.csv
+[client_19] Data loaded: mode=text_only, total=6500 (train=5850, val=650)
+[client_19] Z loaded: shape=(6, 256)
+[client_19] Baseline (on 10% val): {'loss': 0.08519376436105142, 'f1_micro': 0.9015228426395939, 'f1_macro': 0.7576292943247303, 'auc_macro': 0.9599142797966776}
+[Ep 1/2] train_loss_main=0.0569 | train_loss_z=0.0829 | val_loss=0.0804 | val_f1_macro=0.7663
+[Ep 2/2] train_loss_main=0.0544 | train_loss_z=0.0538 | val_loss=0.0815 | val_f1_macro=0.7637
+[client_19] Updated (on 10% val): {'loss': 0.08153150638708702, 'f1_micro': 0.9020408163265307, 'f1_macro': 0.7637201752682804, 'auc_macro': 0.9667219507823445}
+[client 19] updated full model (head only trained) saved → outputs\client_19\updated_heads_v2.pt
+[GpuMonitor] Stopping monitor thread...
+[GpuMonitor] pynvml shutdown.
+[GpuMonitor] Monitor stopped.
+======================================================================
+
+======================================================================
+▶ Client 20 | V2 Update starting...
+======================================================================
+[GpuMonitor] pynvml initialized. Monitoring GPU 0.
+[GpuMonitor] Monitor thread started. Logging to: outputs\client_20\client_20_gpu_update_v2_log.csv
+[client_20] Data loaded: mode=text_only, total=6500 (train=5850, val=650)
+[client_20] Z loaded: shape=(6, 256)
+[client_20] Baseline (on 10% val): {'loss': 0.08118169743281145, 'f1_micro': 0.8712394705174489, 'f1_macro': 0.7400537378061134, 'auc_macro': 0.9763209058549491}
+[Ep 1/2] train_loss_main=0.0582 | train_loss_z=0.0830 | val_loss=0.0818 | val_f1_macro=0.7431
+[Ep 2/2] train_loss_main=0.0576 | train_loss_z=0.0539 | val_loss=0.0835 | val_f1_macro=0.7457
+[client_20] Updated (on 10% val): {'loss': 0.0834647752229984, 'f1_micro': 0.8724035608308606, 'f1_macro': 0.745670013520273, 'auc_macro': 0.9765838694746376}
+[client 20] updated full model (head only trained) saved → outputs\client_20\updated_heads_v2.pt
+[GpuMonitor] Stopping monitor thread...
+[GpuMonitor] pynvml shutdown.
+[GpuMonitor] Monitor stopped.
+...
+```
+
 ## 사용 기술
 - Python, PyTorch
 
